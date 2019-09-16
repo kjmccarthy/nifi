@@ -27,6 +27,7 @@ import org.apache.kudu.client.KuduSession;
 import org.apache.kudu.client.OperationResponse;
 import org.apache.kudu.client.RowError;
 import org.apache.kudu.client.RowErrorsAndOverflowStatus;
+import org.apache.kudu.client.PartialRow;
 import org.apache.kudu.client.SessionConfiguration.FlushMode;
 import org.apache.nifi.controller.AbstractControllerService;
 import org.apache.nifi.flowfile.FlowFile;
@@ -103,6 +104,7 @@ public class TestPutKudu {
         testRunner.setProperty(PutKudu.KUDU_MASTERS, DEFAULT_MASTERS);
         testRunner.setProperty(PutKudu.SKIP_HEAD_LINE, SKIP_HEAD_LINE);
         testRunner.setProperty(PutKudu.IGNORE_NULL, "true");
+        testRunner.setProperty(PutKudu.LOWERCASE_FIELD_NAMES, "true");
         testRunner.setProperty(PutKudu.RECORD_READER, "mock-reader-factory");
         testRunner.setProperty(PutKudu.INSERT_OPERATION, OperationType.INSERT.toString());
     }
@@ -366,54 +368,219 @@ public class TestPutKudu {
 
     @Test
     public void testBuildRow() {
-        buildPartialRow((long) 1, "foo", (short) 10);
+        final Schema kuduSchema = new Schema(Arrays.asList(
+                new ColumnSchema.ColumnSchemaBuilder("id", Type.INT64).key(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("name", Type.STRING).nullable(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("age", Type.INT16).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("updated_at", Type.UNIXTIME_MICROS).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("score", Type.DECIMAL).nullable(true).typeAttributes(
+                        new ColumnTypeAttributes.ColumnTypeAttributesBuilder().precision(9).scale(0).build()
+                ).build()));
+
+        final RecordSchema schema = new SimpleRecordSchema(Arrays.asList(
+                new RecordField("id", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("name", RecordFieldType.STRING.getDataType()),
+                new RecordField("age", RecordFieldType.SHORT.getDataType()),
+                new RecordField("updated_at", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("score", RecordFieldType.LONG.getDataType())));
+
+        Map<String, Object> values = new HashMap<>();
+        values.put("id", (long) 1);
+        values.put("name", "foo");
+        values.put("age", (short) 10);
+        values.put("updated_at", System.currentTimeMillis() * 1000);
+        values.put("score", 10000L);
+
+        testBuildPartialRow(kuduSchema, schema, values, false, false);
     }
 
     @Test
-    public void testBuildPartialRowNullable() {
-        buildPartialRow((long) 1, null, (short) 10);
+    public void testBuildRowNullable() {
+        final Schema kuduSchema = new Schema(Arrays.asList(
+                new ColumnSchema.ColumnSchemaBuilder("id", Type.INT64).key(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("name", Type.STRING).nullable(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("age", Type.INT16).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("updated_at", Type.UNIXTIME_MICROS).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("score", Type.DECIMAL).nullable(true).typeAttributes(
+                        new ColumnTypeAttributes.ColumnTypeAttributesBuilder().precision(9).scale(0).build()
+                ).build()));
+
+        final RecordSchema schema = new SimpleRecordSchema(Arrays.asList(
+                new RecordField("id", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("name", RecordFieldType.STRING.getDataType()),
+                new RecordField("age", RecordFieldType.SHORT.getDataType()),
+                new RecordField("updated_at", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("score", RecordFieldType.LONG.getDataType())));
+
+        Map<String, Object> values = new HashMap<>();
+        values.put("id", (long) 1);
+        values.put("name", null);
+        values.put("age", (short) 10);
+        values.put("updated_at", System.currentTimeMillis() * 1000);
+        values.put("score", 10000L);
+
+        testBuildPartialRow(kuduSchema, schema, values, true, false);
     }
+
+    @Test
+    public void testBuildRowLowercaseFields() {
+        final Schema kuduSchema = new Schema(Arrays.asList(
+                new ColumnSchema.ColumnSchemaBuilder("id", Type.INT64).key(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("name", Type.STRING).nullable(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("age", Type.INT16).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("updated_at", Type.UNIXTIME_MICROS).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("score", Type.DECIMAL).nullable(true).typeAttributes(
+                        new ColumnTypeAttributes.ColumnTypeAttributesBuilder().precision(9).scale(0).build()
+                ).build()));
+
+        final RecordSchema schema = new SimpleRecordSchema(Arrays.asList(
+                new RecordField("ID", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("NAME", RecordFieldType.STRING.getDataType()),
+                new RecordField("AGE", RecordFieldType.SHORT.getDataType()),
+                new RecordField("UPDATED_AT", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("SCORE", RecordFieldType.LONG.getDataType())));
+
+        Map<String, Object> values = new HashMap<>();
+        values.put("ID", (long) 1);
+        values.put("NAME", "foo");
+        values.put("AGE", (short) 10);
+        values.put("UPDATED_AT", System.currentTimeMillis() * 1000);
+        values.put("SCORE", 10000L);
+
+        testBuildPartialRow(kuduSchema, schema, values, false, true);
+    }
+
 
     @Test(expected = IllegalArgumentException.class)
     public void testBuildPartialRowNullPrimaryKey() {
-        buildPartialRow(null, "foo", (short) 10);
+        final Schema kuduSchema = new Schema(Arrays.asList(
+                new ColumnSchema.ColumnSchemaBuilder("id", Type.INT64).key(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("name", Type.STRING).nullable(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("age", Type.INT16).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("updated_at", Type.UNIXTIME_MICROS).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("score", Type.DECIMAL).nullable(true).typeAttributes(
+                        new ColumnTypeAttributes.ColumnTypeAttributesBuilder().precision(9).scale(0).build()
+                ).build()));
+
+        final RecordSchema schema = new SimpleRecordSchema(Arrays.asList(
+                new RecordField("id", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("name", RecordFieldType.STRING.getDataType()),
+                new RecordField("age", RecordFieldType.SHORT.getDataType()),
+                new RecordField("updated_at", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("score", RecordFieldType.LONG.getDataType())));
+
+        Map<String, Object> values = new HashMap<>();
+        values.put("id", null);
+        values.put("name", "foo");
+        values.put("age", (short) 10);
+        values.put("updated_at", System.currentTimeMillis() * 1000);
+        values.put("score", 10000L);
+
+        testBuildPartialRow(kuduSchema, schema, values, false, false);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testBuildPartialRowNotNullable() {
-        buildPartialRow((long) 1, "foo", null);
-    }
-
-    private void buildPartialRow(Long id, String name, Short age) {
         final Schema kuduSchema = new Schema(Arrays.asList(
-            new ColumnSchema.ColumnSchemaBuilder("id", Type.INT64).key(true).build(),
-            new ColumnSchema.ColumnSchemaBuilder("name", Type.STRING).nullable(true).build(),
-            new ColumnSchema.ColumnSchemaBuilder("age", Type.INT16).nullable(false).build(),
-            new ColumnSchema.ColumnSchemaBuilder("updated_at", Type.UNIXTIME_MICROS).nullable(false).build(),
-            new ColumnSchema.ColumnSchemaBuilder("score", Type.DECIMAL).nullable(true).typeAttributes(
-                new ColumnTypeAttributes.ColumnTypeAttributesBuilder().precision(9).scale(0).build()
-            ).build()));
+                new ColumnSchema.ColumnSchemaBuilder("id", Type.INT64).key(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("name", Type.STRING).nullable(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("age", Type.INT16).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("updated_at", Type.UNIXTIME_MICROS).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("score", Type.DECIMAL).nullable(true).typeAttributes(
+                        new ColumnTypeAttributes.ColumnTypeAttributesBuilder().precision(9).scale(0).build()
+                ).build()));
 
         final RecordSchema schema = new SimpleRecordSchema(Arrays.asList(
-            new RecordField("id", RecordFieldType.BIGINT.getDataType()),
-            new RecordField("name", RecordFieldType.STRING.getDataType()),
-            new RecordField("age", RecordFieldType.SHORT.getDataType()),
-            new RecordField("updated_at", RecordFieldType.BIGINT.getDataType()),
-            new RecordField("score", RecordFieldType.LONG.getDataType())));
+                new RecordField("id", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("name", RecordFieldType.STRING.getDataType()),
+                new RecordField("age", RecordFieldType.SHORT.getDataType()),
+                new RecordField("updated_at", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("score", RecordFieldType.LONG.getDataType())));
 
         Map<String, Object> values = new HashMap<>();
-        values.put("id", id);
-        values.put("name", name);
-        values.put("age", age);
+        values.put("id", (long) 1);
+        values.put("name", "foo");
+        values.put("age", null);
         values.put("updated_at", System.currentTimeMillis() * 1000);
         values.put("score", 10000L);
+
+        testBuildPartialRow(kuduSchema, schema, values, false, false);
+    }
+
+    @Test
+    public void testBuildPartialRowDontLowercaseFields() {
+        final Schema kuduSchema = new Schema(Arrays.asList(
+                new ColumnSchema.ColumnSchemaBuilder("ID", Type.INT64).key(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("NAME", Type.STRING).nullable(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("AGE", Type.INT16).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("UPDATED_AT", Type.UNIXTIME_MICROS).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("SCORE", Type.DECIMAL).nullable(true).typeAttributes(
+                        new ColumnTypeAttributes.ColumnTypeAttributesBuilder().precision(9).scale(0).build()
+                ).build()));
+
+        final RecordSchema schema = new SimpleRecordSchema(Arrays.asList(
+                new RecordField("ID", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("NAME", RecordFieldType.STRING.getDataType()),
+                new RecordField("AGE", RecordFieldType.SHORT.getDataType()),
+                new RecordField("UPDATED_AT", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("SCORE", RecordFieldType.LONG.getDataType())));
+
+        Map<String, Object> values = new HashMap<>();
+        values.put("ID", (long) 1);
+        values.put("NAME", "foo");
+        values.put("AGE", (short) 10);
+        values.put("UPDATED_AT", System.currentTimeMillis() * 1000);
+        values.put("SCORE", 10000L);
+
+        testBuildPartialRow(kuduSchema, schema, values, false, false);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testBuildPartialRowDontLowercaseFieldsError() {
+        final Schema kuduSchema = new Schema(Arrays.asList(
+                new ColumnSchema.ColumnSchemaBuilder("id", Type.INT64).key(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("name", Type.STRING).nullable(true).build(),
+                new ColumnSchema.ColumnSchemaBuilder("age", Type.INT16).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("updated_at", Type.UNIXTIME_MICROS).nullable(false).build(),
+                new ColumnSchema.ColumnSchemaBuilder("score", Type.DECIMAL).nullable(true).typeAttributes(
+                        new ColumnTypeAttributes.ColumnTypeAttributesBuilder().precision(9).scale(0).build()
+                ).build()));
+
+        final RecordSchema schema = new SimpleRecordSchema(Arrays.asList(
+                new RecordField("ID", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("NAME", RecordFieldType.STRING.getDataType()),
+                new RecordField("AGE", RecordFieldType.SHORT.getDataType()),
+                new RecordField("UPDATED_AT", RecordFieldType.BIGINT.getDataType()),
+                new RecordField("SCORE", RecordFieldType.LONG.getDataType())));
+
+        Map<String, Object> values = new HashMap<>();
+        values.put("ID", (long) 1);
+        values.put("NAME", "foo");
+        values.put("AGE", null);
+        values.put("UPDATED_AT", System.currentTimeMillis() * 1000);
+        values.put("SCORE", 10000L);
+
+        PartialRow row = testBuildPartialRow(kuduSchema, schema, values, false, false);
+        row.getLong("id");
+    }
+
+    private PartialRow testBuildPartialRow(Schema kuduSchema, RecordSchema schema, Map<String, Object> values, Boolean ignoreNull, Boolean lowercaseFields) {
+        Map<String, Object> data = new HashMap<>();
+        for (Map.Entry<String,Object> entry : values.entrySet()) {
+            data.put(entry.getKey(), entry.getValue());
+        }
+
+        PartialRow row = kuduSchema.newPartialRow();
+
         processor.buildPartialRow(
-            kuduSchema,
-            kuduSchema.newPartialRow(),
-            new MapRecord(schema, values),
-            schema.getFieldNames(),
-                true
+                kuduSchema,
+                row,
+                new MapRecord(schema, data),
+                schema.getFieldNames(),
+                ignoreNull,
+                lowercaseFields
         );
+        return row;
     }
 
     private Tuple<Insert, OperationResponse> insert(boolean success) {
