@@ -81,16 +81,6 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .build();
 
-    static final PropertyDescriptor KUDU_KEEP_ALIVE_PERIOD_TIMEOUT_MS = new Builder()
-            .name("kudu-keep-alive-period-timeout-ms")
-            .displayName("Kudu Keep Alive Period Timeout")
-            .description("Default timeout used for user operations")
-            .required(false)
-            .defaultValue(String.valueOf(AsyncKuduClient.DEFAULT_KEEP_ALIVE_PERIOD_MS) + "ms")
-            .addValidator(StandardValidators.TIME_PERIOD_VALIDATOR)
-            .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
-            .build();
-
     protected KuduClient kuduClient;
 
     private volatile KerberosUser kerberosUser;
@@ -122,11 +112,9 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
 
     protected KuduClient buildClient(final String masters, final ProcessContext context) {
         final Integer operationTimeout = context.getProperty(KUDU_OPERATION_TIMEOUT_MS).asTimePeriod(TimeUnit.MILLISECONDS).intValue();
-        final Integer adminOperationTimeout = context.getProperty(KUDU_KEEP_ALIVE_PERIOD_TIMEOUT_MS).asTimePeriod(TimeUnit.MILLISECONDS).intValue();
 
         return new KuduClient.KuduClientBuilder(masters)
                 .defaultOperationTimeoutMs(operationTimeout)
-                .defaultSocketReadTimeoutMs(adminOperationTimeout)
                 .build();
     }
 

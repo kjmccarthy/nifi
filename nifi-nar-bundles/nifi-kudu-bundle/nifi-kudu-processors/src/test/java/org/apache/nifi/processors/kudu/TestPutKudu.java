@@ -391,7 +391,8 @@ public class TestPutKudu {
         values.put("updated_at", System.currentTimeMillis() * 1000);
         values.put("score", 10000L);
 
-        testBuildPartialRow(kuduSchema, schema, values, false, false);
+        PartialRow row = testBuildPartialRow(kuduSchema, schema, values, false, false);
+        row.getLong("id");
     }
 
     @Test
