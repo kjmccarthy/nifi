@@ -81,16 +81,6 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .build();
 
-    static final PropertyDescriptor KUDU_KEEP_ALIVE_PERIOD_TIMEOUT_MS = new Builder()
-            .name("kudu-keep-alive-period-timeout-ms")
-            .displayName("Kudu Keep Alive Period Timeout")
-            .description("Default timeout used for user operations")
-            .required(false)
-            .defaultValue(String.valueOf(AsyncKuduClient.DEFAULT_KEEP_ALIVE_PERIOD_MS) + "ms")
-            .addValidator(StandardValidators.TIME_PERIOD_VALIDATOR)
-            .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
-            .build();
-
     protected KuduClient kuduClient;
 
     private volatile KerberosUser kerberosUser;
@@ -108,25 +98,24 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
         final KerberosCredentialsService credentialsService = context.getProperty(KERBEROS_CREDENTIALS_SERVICE).asControllerService(KerberosCredentialsService.class);
 
         if (credentialsService == null) {
-            return;
+            this.kuduClient = buildClient(kuduMasters, context);
         }
+        else {
+            final String keytab = credentialsService.getKeytab();
+            final String principal = credentialsService.getPrincipal();
+            kerberosUser = loginKerberosUser(principal, keytab);
 
-        final String keytab = credentialsService.getKeytab();
-        final String principal = credentialsService.getPrincipal();
-        kerberosUser = loginKerberosUser(principal, keytab);
-
-        final KerberosAction<KuduClient> kerberosAction = new KerberosAction<>(kerberosUser, () -> buildClient(kuduMasters, context), getLogger());
-        this.kuduClient = kerberosAction.execute();
+            final KerberosAction<KuduClient> kerberosAction = new KerberosAction<>(kerberosUser, () -> buildClient(kuduMasters, context), getLogger());
+            this.kuduClient = kerberosAction.execute();
+        }
     }
 
 
     protected KuduClient buildClient(final String masters, final ProcessContext context) {
         final Integer operationTimeout = context.getProperty(KUDU_OPERATION_TIMEOUT_MS).asTimePeriod(TimeUnit.MILLISECONDS).intValue();
-        final Integer adminOperationTimeout = context.getProperty(KUDU_KEEP_ALIVE_PERIOD_TIMEOUT_MS).asTimePeriod(TimeUnit.MILLISECONDS).intValue();
 
         return new KuduClient.KuduClientBuilder(masters)
                 .defaultOperationTimeoutMs(operationTimeout)
-                .defaultSocketReadTimeoutMs(adminOperationTimeout)
                 .build();
     }
 

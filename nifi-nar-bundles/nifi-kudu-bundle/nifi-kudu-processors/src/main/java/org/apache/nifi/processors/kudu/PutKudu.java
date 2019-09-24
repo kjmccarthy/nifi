@@ -196,7 +196,6 @@ public class PutKudu extends AbstractKuduProcessor {
         properties.add(BATCH_SIZE);
         properties.add(IGNORE_NULL);
         properties.add(KUDU_OPERATION_TIMEOUT_MS);
-        properties.add(KUDU_KEEP_ALIVE_PERIOD_TIMEOUT_MS);
         return properties;
     }
 
